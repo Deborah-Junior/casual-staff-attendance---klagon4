@@ -77,7 +77,7 @@
                     </div>
                 </div>
 
-                <button type="submit" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow transition">
+                <button id="submitBtn" type="submit" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow transition flex items-center justify-center">
                     Submit Check-In
                 </button>
             </form>
@@ -89,14 +89,14 @@
             <div class="bg-gray-50 border p-4 rounded-xl flex flex-wrap justify-between items-center gap-4">
                 <div>
                     <h3 class="font-bold text-gray-800">Admin Control Hub</h3>
-                    <p class="text-sm text-gray-500">Manage roster, inspect summaries, or export logs.</p>
+                    <p class="text-sm text-gray-500">Manage roster, inspect summaries, or view auto-synced sheet logs.</p>
                 </div>
                 <div class="flex flex-wrap gap-2">
                     <button onclick="changePinPrompt()" class="bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow">
                         Change Admin PIN
                     </button>
-                    <button onclick="exportToCSV()" class="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow">
-                        Download Records (CSV)
+                    <button onclick="fetchSheetLogs()" class="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow">
+                        Refresh Logs from Sheet
                     </button>
                     <button onclick="switchView('checkin')" class="bg-gray-300 hover:bg-gray-400 text-gray-800 text-sm font-semibold px-4 py-2 rounded-lg">
                         Close Admin
@@ -139,7 +139,7 @@
 
             <!-- Detailed Logs Card -->
             <div class="bg-white border rounded-xl p-4 shadow-sm">
-                <h3 class="font-bold text-gray-800 mb-3">All Check-In Logs</h3>
+                <h3 class="font-bold text-gray-800 mb-3">All Live Sheet Logs</h3>
                 <div class="overflow-x-auto max-h-64">
                     <table class="w-full text-left text-sm">
                         <thead>
@@ -160,7 +160,11 @@
     </div>
 
     <script>
-        // Default Staff Array
+        // -------------------------------------------------------------
+        // PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE:
+        const GOOGLE_SCRIPT_URL = "YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE";
+        // -------------------------------------------------------------
+
         const defaultStaff = [
             "Patrick Apawudza",
             "John Njoku",
@@ -170,25 +174,19 @@
             "Godfred OK"
         ];
 
-        // Retrieve data from localStorage or fallback to defaults
         let staffList = JSON.parse(localStorage.getItem('motorway_staff'));
         if (!staffList || staffList.length === 0) {
             staffList = defaultStaff;
             localStorage.setItem('motorway_staff', JSON.stringify(staffList));
         }
 
-        let attendanceLogs = JSON.parse(localStorage.getItem('motorway_logs')) || [];
-
-        // Admin Security PINs
+        let attendanceLogs = [];
         let adminPin = localStorage.getItem('motorway_admin_pin') || "1234";
         const MASTER_RECOVERY_CODE = "motorway2026";
-
         let signaturePad = null;
 
-        // Set default date picker value to today
         document.getElementById('attendanceDate').valueAsDate = new Date();
 
-        // Helper function to extract Day Name (e.g. Monday, Tuesday) from Date String
         function getDayOfWeekName(dateString) {
             if (!dateString) return '';
             const parts = dateString.split('-');
@@ -199,7 +197,6 @@
             return new Date(dateString).toLocaleDateString(undefined, { weekday: 'long' });
         }
 
-        // Update day indicator and date header whenever date input changes
         function updateSelectedDayDisplay() {
             const dateVal = document.getElementById('attendanceDate').value;
             const dayName = getDayOfWeekName(dateVal);
@@ -214,7 +211,6 @@
             document.getElementById('liveDate').textContent = formattedDateStr;
         }
 
-        // Live Clock Loop
         function updateClock() {
             const now = new Date();
             document.getElementById('liveClock').textContent = now.toLocaleTimeString();
@@ -223,7 +219,6 @@
         updateClock();
         updateSelectedDayDisplay();
 
-        // Initialize Signature Pad Canvas
         function initSignaturePad() {
             const canvas = document.getElementById('pad');
             const ratio = window.devicePixelRatio || 1;
@@ -244,7 +239,6 @@
             if (signaturePad) signaturePad.clear();
         }
 
-        // Populate Name Dropdown from staffList array
         function populateDropdown() {
             const select = document.getElementById('staffSelect');
             select.innerHTML = '<option value="">-- Select your name --</option>';
@@ -257,7 +251,6 @@
         }
         populateDropdown();
 
-        // View Switcher (Check-in vs Admin)
         function switchView(view) {
             if (view === 'checkin') {
                 document.getElementById('checkinView').classList.remove('hidden');
@@ -270,11 +263,10 @@
                 document.getElementById('adminView').classList.remove('hidden');
                 document.getElementById('navAdmin').className = "px-4 py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white shadow";
                 document.getElementById('navCheckin').className = "px-4 py-2 text-sm font-semibold rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300";
-                renderAdminData();
+                fetchSheetLogs();
             }
         }
 
-        // Secure PIN Access Control
         function checkAdminAccess() {
             let pin = prompt("Enter Admin PIN:");
             if (pin === null) return;
@@ -304,7 +296,6 @@
             }
         }
 
-        // Change Admin PIN Prompt
         function changePinPrompt() {
             let current = prompt("Enter current Admin PIN:");
             if (current === adminPin) {
@@ -321,59 +312,65 @@
             }
         }
 
-        // Handle Form Submission
-        function handleCheckIn(e) {
+        // Automatic Google Sheet Submission
+        async function handleCheckIn(e) {
             e.preventDefault();
+            const submitBtn = document.getElementById('submitBtn');
             const name = document.getElementById('staffSelect').value;
             const shift = document.getElementById('shiftSelect').value;
             const date = document.getElementById('attendanceDate').value;
             const dayOfWeek = getDayOfWeekName(date);
 
-            if (!name) {
-                showAlert("Please choose your name.", "err");
-                return;
-            }
-            if (!shift) {
-                showAlert("Please select a shift.", "err");
-                return;
-            }
-            if (signaturePad.isEmpty()) {
-                showAlert("Please provide your signature.", "err");
-                return;
-            }
+            if (!name) { showAlert("Please choose your name.", "err"); return; }
+            if (!shift) { showAlert("Please select a shift.", "err"); return; }
+            if (signaturePad.isEmpty()) { showAlert("Please provide your signature.", "err"); return; }
 
             const sigDataUrl = signaturePad.toDataURL();
             const now = new Date();
             const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-            attendanceLogs.unshift({
+            const payload = {
                 name: name,
                 dayOfWeek: dayOfWeek,
                 shift: shift,
                 date: date,
                 time: time,
                 signature: sigDataUrl
-            });
+            };
 
-            localStorage.setItem('motorway_logs', JSON.stringify(attendanceLogs));
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = `Submitting to Sheet...`;
 
-            // Reset form
-            document.getElementById('checkinForm').reset();
-            document.getElementById('attendanceDate').valueAsDate = new Date();
-            updateSelectedDayDisplay();
-            signaturePad.clear();
+            try {
+                // Post directly to Google Apps Script Web App
+                await fetch(GOOGLE_SCRIPT_URL, {
+                    method: 'POST',
+                    mode: 'no-cors', // Standard cross-origin setting for Google Web Apps
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
 
-            showAlert(`Thank you, ${name}. Checked in for ${dayOfWeek} (${shift} Shift)!`, "ok");
+                document.getElementById('checkinForm').reset();
+                document.getElementById('attendanceDate').valueAsDate = new Date();
+                updateSelectedDayDisplay();
+                signaturePad.clear();
+
+                showAlert(`Thank you, ${name}. Checked in and saved automatically to Google Sheets!`, "ok");
+            } catch (err) {
+                showAlert("Error submitting data. Please check connection.", "err");
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = `Submit Check-In`;
+            }
         }
 
         function showAlert(msg, type) {
             const box = document.getElementById('alertBox');
             const cls = type === 'ok' ? 'bg-green-100 text-green-800 border-green-200' : 'bg-red-100 text-red-800 border-red-200';
             box.innerHTML = `<div class="p-3 mb-4 border rounded-xl font-medium text-sm ${cls}">${msg}</div>`;
-            setTimeout(() => { box.innerHTML = ''; }, 4000);
+            setTimeout(() => { box.innerHTML = ''; }, 5000);
         }
 
-        // Add New Staff Member
         function addStaff() {
             const input = document.getElementById('newStaffInput');
             const val = input.value.trim();
@@ -392,7 +389,6 @@
             renderAdminData();
         }
 
-        // Remove Staff Member
         function removeStaff(name) {
             if (confirm(`Remove ${name} from the roster?`)) {
                 staffList = staffList.filter(s => s !== name);
@@ -402,7 +398,22 @@
             }
         }
 
-        // Render Admin Panel Data
+        // Fetch up-to-date logs from Google Sheet
+        async function fetchSheetLogs() {
+            if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes("YOUR_GOOGLE_APPS_SCRIPT")) {
+                renderAdminData();
+                return;
+            }
+            try {
+                const response = await fetch(GOOGLE_SCRIPT_URL);
+                attendanceLogs = await response.json();
+                renderAdminData();
+            } catch (e) {
+                console.error("Could not fetch logs from sheet:", e);
+                renderAdminData();
+            }
+        }
+
         function renderAdminData() {
             // Roster Table
             const staffTbody = document.getElementById('adminStaffTable');
@@ -456,27 +467,7 @@
                         <td class="p-2"><img src="${r.signature}" class="h-8 border bg-white rounded" alt="Signature"></td>
                     </tr>
                 `;
-            }).join('') || `<tr><td colspan="6" class="p-2 text-gray-500">No attendance records yet.</td></tr>`;
-        }
-
-        // CSV Exporter
-        function exportToCSV() {
-            if (attendanceLogs.length === 0) {
-                alert("No records to export.");
-                return;
-            }
-
-            let csv = "Name,Day of Week,Shift,Date,Time\n";
-            attendanceLogs.forEach(r => {
-                const dayName = r.dayOfWeek || getDayOfWeekName(r.date);
-                csv += `"${r.name}","${dayName}","${r.shift || 'DAY'}","${r.date}","${r.time}"\n`;
-            });
-
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = `Motorway_Express_Attendance_${new Date().toISOString().slice(0, 10)}.csv`;
-            link.click();
+            }).join('') || `<tr><td colspan="6" class="p-2 text-gray-500">No attendance records found in Google Sheet yet.</td></tr>`;
         }
     </script>
 </body>
