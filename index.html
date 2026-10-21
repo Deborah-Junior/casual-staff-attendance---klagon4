@@ -486,7 +486,7 @@
             localStorage.setItem('motorway_logs', JSON.stringify(attendanceLogs));
 
             // 2. Send data directly to Google Sheet
-            if (GOOGLE_SCRIPT_URL && GOOGLE_SCRIPT_URL !== 'YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL') {
+            if (GOOGLE_SCRIPT_URL && GOOGLE_SCRIPT_URL !== 'https://script.google.com/u/0/home/projects/1IMQTYMytCYGGlw1Bl2vYGXeHx43A3rn9xiYbxjgJKAhj-xsk3PZskGyp/edit') {
                 try {
                     fetch(GOOGLE_SCRIPT_URL, {
                         method: 'POST',
